@@ -107,6 +107,30 @@ def is_memory_path(path: str, root: Path | None = None) -> bool:
     return False
 
 
+def project_relative(path: str, root: Path | None = None) -> str:
+    """One spelling per file, so `src/a.py`, `./src/a.py` and the absolute
+    path all match the same events.
+
+    ``./`` and ``..`` fold through ``normpath``; an absolute path inside the
+    project becomes project-relative (resolved too, for macOS ``/tmp`` and
+    symlinked folders). Anything else is returned normalized but unanchored.
+    """
+    normalized = path.replace("\\", "/")
+    if not normalized:
+        return path
+    candidate = posixpath.normpath(normalized)
+    if not posixpath.isabs(candidate):
+        return candidate
+    root_posix = (root or Path.cwd()).resolve().as_posix()
+    for spelling in (candidate, _resolved_posix(candidate)):
+        try:
+            rel = Path(spelling).relative_to(root_posix)
+        except ValueError:
+            continue
+        return rel.as_posix()
+    return candidate
+
+
 def _resolved_posix(path: str) -> str:
     try:
         return Path(path).resolve().as_posix()

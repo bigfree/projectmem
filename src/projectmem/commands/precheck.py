@@ -28,7 +28,7 @@ import typer
 
 from projectmem.glyphs import RULE
 from projectmem.models import Event, location_to_file, superseded_ids
-from projectmem.staleness import is_memory_path
+from projectmem.staleness import is_memory_path, project_relative
 from projectmem.storage import MEM_DIR, read_events, require_mem_dir
 
 
@@ -257,6 +257,9 @@ def _analyze_files(
     # May indicate unresolved architectural issue" about the memory layer.
     # Filtered here, not in the callers, so the MCP precheck_file path is covered.
     files = [f for f in files if not is_memory_path(f, root)]
+    # Events store project-relative paths; `./src/a.py` or an absolute path
+    # matched nothing and came back "Safe to modify".
+    files = [project_relative(f, root) for f in files]
     if not files:
         return warnings
 
@@ -280,7 +283,7 @@ def _analyze_files(
 
     for file_path in files:
         # Find all events referencing this file
-        file_events = _events_for_file(file_path, events)
+        file_events = _events_for_file(file_path, events, root)
 
         if not file_events:
             continue
@@ -419,7 +422,9 @@ def _analyze_files(
     return warnings
 
 
-def _events_for_file(file_path: str, events: list[Event]) -> list[Event]:
+def _events_for_file(
+    file_path: str, events: list[Event], root: Path | None = None
+) -> list[Event]:
     """Return all live events that reference this file.
 
     Superseded events are excluded. Warning someone off an approach on the
@@ -432,13 +437,13 @@ def _events_for_file(file_path: str, events: list[Event]) -> list[Event]:
         if e.id in retired:
             continue
         # Direct files list
-        if file_path in e.files:
+        if file_path in (project_relative(f, root) for f in e.files):
             matching.append(e)
             continue
         # Location field
         if e.location:
             loc_file = location_to_file(e.location) or ""
-            if loc_file == file_path:
+            if loc_file and project_relative(loc_file, root) == file_path:
                 matching.append(e)
                 continue
         # Summary mention
