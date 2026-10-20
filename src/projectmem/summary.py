@@ -29,6 +29,21 @@ RECENT_FIXED_ISSUES = 10
 RECENT_DECISIONS = 15
 OPEN_IN_FULL = 20
 
+# Longest record text summary.md prints. The summary is read at the start of
+# every session, so a record pasted with its whole investigation costs its full
+# length every time; the full text stays in issues/, events.jsonl and search.
+LINE_CHARS = 300
+
+
+def _clip(text: str) -> str:
+    if len(text) <= LINE_CHARS:
+        return text
+    head = text[: LINE_CHARS - 3]
+    # Cut at a word boundary, so a clipped line never ends in half a word.
+    if " " in head:
+        head = head.rsplit(" ", 1)[0]
+    return head.rstrip(" ,;:") + "..."
+
 
 def _issue_sort_key(item: tuple[str, list[Event]]) -> tuple[int, str]:
     """Order issue ids numerically: as strings, "10000" sorts before "9999"."""
@@ -39,16 +54,13 @@ def _issue_sort_key(item: tuple[str, list[Event]]) -> tuple[int, str]:
 def _issue_lines(
     issue_id: str, issue: Event, issue_events: list[Event], fix: Event | None
 ) -> list[str]:
-    """One issue's summary entry: the issue, its fix, and recent lessons."""
-    status = "fixed" if fix else "open"
-    marker = "DONE" if fix else "OPEN"
+    """One issue's summary entry: the issue and, while it is open, its lessons."""
     issue_loc = f" [{issue.location}]" if issue.location else ""
     if fix:
-        fix_loc = f" [{fix.location}]" if fix.location else ""
-        outcome = f" -> {fix.summary}{fix_loc}"
-    else:
-        outcome = ""
-    lines = [f"- [{marker}] #{issue_id} {issue.summary}{issue_loc}{outcome} ({status})"]
+        # A fixed issue is history: its title says it happened, and the fix and
+        # the attempts behind it are one get_issue call away.
+        return [f"- [DONE] #{issue_id} {_clip(issue.summary)}{issue_loc} (fixed)"]
+    lines = [f"- [OPEN] #{issue_id} {_clip(issue.summary)}{issue_loc} (open)"]
     # Surface non-worked attempts. Both `failed` and `partial` outcomes
     # encode lessons the next session needs — dropping `partial` (L-027b)
     # would let an AI repeat work that already got 80% of the way there.
@@ -61,7 +73,7 @@ def _issue_lines(
     for lesson_event in lessons[-3:]:
         loc = f" [{lesson_event.location}]" if lesson_event.location else ""
         tag = label.get(lesson_event.outcome or "failed", "Attempt")
-        lines.append(f"  - {tag}: {lesson_event.summary}{loc}")
+        lines.append(f"  - {tag}: {_clip(lesson_event.summary)}{loc}")
     return lines
 
 
@@ -207,7 +219,7 @@ def build_summary(
             )
         for event in decisions[-RECENT_DECISIONS:]:
             loc = f" [{event.location}]" if event.location else ""
-            lines.append(f"- {event.summary}{loc}")
+            lines.append(f"- {_clip(event.summary)}{loc}")
     else:
         lines.append("- No decisions logged yet.")
 
@@ -215,7 +227,7 @@ def build_summary(
     if notes:
         for event in notes[-10:]:
             loc = f" [{event.location}]" if event.location else ""
-            lines.append(f"- {event.summary}{loc}")
+            lines.append(f"- {_clip(event.summary)}{loc}")
     else:
         lines.append("- No notes logged yet.")
 

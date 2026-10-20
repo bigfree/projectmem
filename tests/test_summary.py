@@ -32,11 +32,12 @@ def test_summary_and_issue_file_are_regenerated(tmp_path, monkeypatch):
 
     assert "# projectmem" in summary
     assert "[DONE] #0001 login redirect loop" in summary
-    assert "fixed redirect guard in auth/redirect.py:88" in summary
     assert "Keep redirect handling in one middleware" in summary
     assert "`auth/redirect.py:88`" in summary
     assert len(issue_files) == 1
-    assert "login redirect loop" in issue_files[0].read_text(encoding="utf-8")
+    issue_file = issue_files[0].read_text(encoding="utf-8")
+    assert "login redirect loop" in issue_file
+    assert "fixed redirect guard in auth/redirect.py:88" in issue_file
 
 
 def test_regenerate_preserves_project_purpose(tmp_path, monkeypatch):
@@ -247,3 +248,70 @@ def test_an_orphan_attempt_does_not_crash_the_summary(tmp_path):
     lines = _recent_issue_lines(build_summary(events, tmp_path))
 
     assert len(lines) == 1 and "#0001" in lines[0]
+
+
+def test_a_fixed_issue_is_listed_by_its_title_alone(tmp_path):
+    """A fixed issue is history. Its title says it happened; how it was fixed
+    and what was tried on the way is one get_issue call away."""
+    from projectmem.models import Event
+    from projectmem.summary import build_summary
+
+    events = [
+        Event(type="issue", summary="login redirect loop", issue_id="0001",
+              location="auth/redirect.py"),
+        Event(type="attempt", summary="cleared the session cookie first",
+              issue_id="0001", outcome="failed"),
+        Event(type="fix", summary="guarded the redirect in one middleware",
+              issue_id="0001", location="auth/middleware.py"),
+    ]
+    summary = build_summary(events, tmp_path)
+
+    assert _recent_issue_lines(summary) == [
+        "- [DONE] #0001 login redirect loop [auth/redirect.py] (fixed)"
+    ]
+    assert "cleared the session cookie first" not in summary
+    assert "guarded the redirect in one middleware" not in summary
+
+
+def test_long_records_are_clipped_but_keep_their_location(tmp_path):
+    """One record pasted with its whole investigation used to cost its full
+    length on every session start. The text is clipped; the location is not,
+    because precheck_file and the reader both navigate by it."""
+    from projectmem.models import Event
+    from projectmem.summary import LINE_CHARS, build_summary
+
+    long_text = "the collector drops its websocket " * 30
+    events = [
+        Event(type="issue", summary=long_text, issue_id="0001",
+              location="src/collector/socket.py"),
+        Event(type="attempt", summary=long_text, issue_id="0001", outcome="partial"),
+        Event(type="decision", summary=long_text),
+        Event(type="note", summary=long_text),
+    ]
+    summary = build_summary(events, tmp_path)
+
+    issue_line = _recent_issue_lines(summary)[0]
+    assert issue_line.endswith("... [src/collector/socket.py] (open)")
+    clipped = [line for line in summary.splitlines() if "the collector drops" in line]
+    assert len(clipped) == 4
+    for line in clipped:
+        text = line[line.index("the collector drops"):].split("...")[0] + "..."
+        assert len(text) <= LINE_CHARS
+
+
+def test_short_records_are_printed_unchanged(tmp_path):
+    from projectmem.models import Event
+    from projectmem.summary import build_summary
+
+    events = [
+        Event(type="issue", summary="cache misses on cold start", issue_id="0001"),
+        Event(type="attempt", summary="warmed the cache in main.py",
+              issue_id="0001", outcome="failed"),
+        Event(type="decision", summary="keep the cache in process"),
+    ]
+    summary = build_summary(events, tmp_path)
+
+    assert "- [OPEN] #0001 cache misses on cold start (open)" in summary
+    assert "  - Failed attempt: warmed the cache in main.py" in summary
+    assert "- keep the cache in process" in summary
+    assert "..." not in _section(summary, "Recent issues")
