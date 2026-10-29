@@ -15,6 +15,7 @@ import pytest
 from conftest import set_fake_home
 from projectmem.models import Event
 from projectmem.storage import append_event, initialize
+from projectmem.summary import regenerate_summary
 
 
 def _completed(args: list[str], stdout: str = "") -> subprocess.CompletedProcess[str]:
@@ -300,3 +301,98 @@ def test_server_builds_when_fastmcp_is_gone(monkeypatch, tmp_path):
     # 15 memory tools + list_projects / current_project for global routing
     assert len(module.mcp.tools) == 17
     assert "list_projects" in module.mcp.tools
+
+
+@pytest.mark.parametrize("spelling", ["src/auth.py", "./src/auth.py", "ABSOLUTE"])
+def test_mcp_precheck_file_matches_every_spelling_of_a_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, spelling: str
+) -> None:
+    """The field accepts "project-relative or absolute" paths, but only the
+    exact stored string matched: `./src/auth.py` and the absolute path came
+    back "Safe to modify" past three failed attempts and an open issue."""
+    project = _make_git_project(tmp_path, monkeypatch)
+    (project / "src").mkdir()
+    (project / "src" / "auth.py").write_text("x = 1\n", encoding="utf-8")
+    append_event(
+        Event(type="issue", summary="token refresh race", location="src/auth.py",
+              issue_id="0001"),
+        project,
+    )
+    for i in range(3):
+        append_event(
+            Event(type="attempt", summary=f"lock variant {i}", outcome="failed",
+                  location="src/auth.py"),
+            project,
+        )
+    file_path = str(project / "src" / "auth.py") if spelling == "ABSOLUTE" else spelling
+
+    text = _tool_text(
+        _call_mcp_tool(project, tmp_path, "precheck_file", {"file_path": file_path})
+    )
+
+    assert "Safe to modify" not in text
+    assert "3 attempts" in text
+
+
+def test_mcp_precheck_file_matches_an_event_logged_with_an_absolute_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = _make_git_project(tmp_path, monkeypatch)
+    (project / "src").mkdir()
+    (project / "src" / "db.py").write_text("x = 1\n", encoding="utf-8")
+    append_event(
+        Event(type="issue", summary="pool leak",
+              location=str(project / "src" / "db.py"), issue_id="0001"),
+        project,
+    )
+
+    text = _tool_text(
+        _call_mcp_tool(project, tmp_path, "precheck_file", {"file_path": "src/db.py"})
+    )
+
+    assert "Safe to modify" not in text
+
+
+def test_mcp_get_issue_accepts_unpadded_ids_and_rejects_globs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The field promises "Numeric strings without padding (e.g., '42') are
+    also accepted", but `1` found nothing and `*` returned issue 0001."""
+    project = _make_git_project(tmp_path, monkeypatch)
+    _call_mcp_tool(project, tmp_path, "log_issue", {"summary": "login double submit"})
+
+    for issue_id in ("0001", "1", "01", "#1"):
+        text = _tool_text(
+            _call_mcp_tool(project, tmp_path, "get_issue", {"issue_id": issue_id})
+        )
+        assert "login double submit" in text, issue_id
+
+    for issue_id in ("*", "2"):
+        text = _tool_text(
+            _call_mcp_tool(project, tmp_path, "get_issue", {"issue_id": issue_id})
+        )
+        assert text == f"No issue found with ID {issue_id}.", issue_id
+
+
+def test_mcp_get_issue_finds_backfilled_legacy_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`pjm init` backfill writes ids like `legacy_f436`, which `pjm fix`
+    accepts; a digits-only check made get_issue refuse them."""
+    project = _make_git_project(tmp_path, monkeypatch)
+    append_event(
+        Event(type="issue", issue_id="legacy_f436", summary="Legacy issue: fix login"),
+        project,
+    )
+    regenerate_summary(project)
+
+    text = _tool_text(
+        _call_mcp_tool(project, tmp_path, "get_issue", {"issue_id": "legacy_f436"})
+    )
+    assert "fix login" in text
+
+    for issue_id in ("legacy_*", "legacy_f43?", "[l]egacy_f436"):
+        text = _tool_text(
+            _call_mcp_tool(project, tmp_path, "get_issue", {"issue_id": issue_id})
+        )
+        assert text == f"No issue found with ID {issue_id}.", issue_id

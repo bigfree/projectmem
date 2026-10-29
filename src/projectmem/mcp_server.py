@@ -32,6 +32,7 @@ import contextlib
 import functools
 import io
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Annotated, Callable, Optional
@@ -374,9 +375,15 @@ def get_issue(
     summary. Example: get_issue('0042').
 
     Read-only."""
-    from projectmem.storage import issues_dir
+    from projectmem.storage import issues_dir, normalize_issue_id
     idir = issues_dir(_root_for(project))
-    matches = list(idir.glob(f"{issue_id}-*.md"))
+    # Same normalization as record_fix: "1", "001" and "#1" all mean 0001.
+    # Only ID-shaped input reaches the glob ("0001", backfill's "legacy_f436"),
+    # so "*" or "?" can't match some other issue.
+    wanted = normalize_issue_id(issue_id) or ""
+    if not re.fullmatch(r"[\w-]+", wanted):
+        return f"No issue found with ID {issue_id}."
+    matches = list(idir.glob(f"{wanted}-*.md"))
     if not matches:
         return f"No issue found with ID {issue_id}."
     return matches[0].read_text(encoding="utf-8")
