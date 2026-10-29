@@ -22,7 +22,7 @@ PLAN_FILE = "plan.md"
 # project should pick up. `pjm init` rewrites a file whose marker is missing or
 # older than this (keeping a .bak); a file at this version is the user's and is
 # left alone. The marker is written into the template by ai_instructions().
-INSTRUCTIONS_VERSION = 1
+INSTRUCTIONS_VERSION = 2
 INSTRUCTIONS_BACKUP_FILE = AI_INSTRUCTIONS_FILE + ".bak"
 _INSTRUCTIONS_MARKER_RE = re.compile(r"<!--\s*projectmem-instructions:\s*(\d+)\s*-->")
 GLOBAL_MEMORY_HEADING = "## Global Memory — Inherited Knowledge"
@@ -523,6 +523,10 @@ def ai_instructions() -> str:
         "- Keep entries concise but specific enough that another person or AI can "
         "avoid repeating work. Include file paths, error names, test names.\n"
         "- Prefer several small accurate entries over one vague long entry.\n"
+        "- Keep an issue title under 140 characters and an attempt, fix, note or "
+        "decision under 300. `summary.md` is read at every session start and clips "
+        "longer records at 300 characters; put further evidence into another "
+        "`record_attempt` instead of one long entry.\n"
         "- Do not claim something is fixed until tests, reproduction, or user "
         "confirmation supports it.\n"
         "- Do not overwrite history. `events.jsonl` is append-only; `summary.md` "

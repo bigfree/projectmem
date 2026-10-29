@@ -235,6 +235,17 @@ def test_supersedes_guidance_says_what_it_does_to_the_summary():
     assert "supersedes=" in text or "--supersedes" in text
 
 
+# ── #29: clipping bounds the summary; asking for short records keeps it small ─
+
+def test_instructions_state_the_record_length_the_summary_clips_at():
+    """The limit the agent is told must be the one summary.md enforces."""
+    from projectmem.summary import LINE_CHARS
+
+    text = ai_instructions()
+    assert "140 characters" in text
+    assert f"clips longer records at {LINE_CHARS} characters" in text
+
+
 def test_the_three_surfaces_agree_about_the_session_start_order():
     """There is a standing warning about these drifting apart.
 
