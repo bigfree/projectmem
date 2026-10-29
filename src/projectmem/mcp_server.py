@@ -60,16 +60,10 @@ from projectmem.storage import (
 )
 
 
-# ── #29: say how long a record may be where the record is written ──────────
-#
-# AI_INSTRUCTIONS.md states the limits too, but a client that never calls
-# get_instructions only ever sees the tool's own argument descriptions.
 _TITLE_LENGTH = f" Keep it under {TITLE_CHARS} characters."
 _RECORD_LENGTH = (
     f" Keep it under {RECORD_CHARS} characters: summary.md clips longer text."
 )
-# A fix is not shown in summary.md at all (get_issue has it), so no clipping
-# reason to give — only the limit.
 _FIX_LENGTH = f" Keep it under {RECORD_CHARS} characters."
 
 

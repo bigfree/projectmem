@@ -27,9 +27,6 @@ INSTRUCTIONS_BACKUP_FILE = AI_INSTRUCTIONS_FILE + ".bak"
 _INSTRUCTIONS_MARKER_RE = re.compile(r"<!--\s*projectmem-instructions:\s*(\d+)\s*-->")
 GLOBAL_MEMORY_HEADING = "## Global Memory — Inherited Knowledge"
 
-# Record lengths the guidance asks for (#29). summary.md is read at the start
-# of every session and clips record text at RECORD_CHARS; the instructions and
-# the MCP tool descriptions state both limits from here, so they cannot drift.
 TITLE_CHARS = 140
 RECORD_CHARS = 300
 

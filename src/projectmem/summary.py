@@ -36,21 +36,10 @@ RECENT_DECISIONS = 15
 OPEN_IN_FULL = 20
 
 def _clip(text: str) -> str:
-    """A record as one summary line of at most RECORD_CHARS characters.
-
-    The summary is read at the start of every session, so a record pasted with
-    its whole investigation costs its full length every time; the full text
-    stays in issues/, events.jsonl and search. Line breaks are folded into
-    spaces, so a pasted traceback or a line starting with "## " cannot break
-    out of its list item.
-    """
     text = " ".join(text.split())
     if len(text) <= RECORD_CHARS:
         return text
     head = text[: RECORD_CHARS - 3]
-    # Cut at a word boundary, so a clipped line never ends in half a word —
-    # but only in the second half: a record whose one early space precedes a
-    # long path or URL would otherwise shrink to its first word.
     boundary = head.rfind(" ", RECORD_CHARS // 2 + 1)
     if boundary != -1:
         head = head[:boundary]
@@ -58,7 +47,6 @@ def _clip(text: str) -> str:
 
 
 def _loc(location: str | None) -> str:
-    """A location as the summary prints it: never clipped, always one line."""
     return f" [{' '.join(location.split())}]" if location else ""
 
 
@@ -71,12 +59,8 @@ def _issue_sort_key(item: tuple[str, list[Event]]) -> tuple[int, str]:
 def _issue_lines(
     issue_id: str, issue: Event, issue_events: list[Event], fix: Event | None
 ) -> list[str]:
-    """One issue's summary entry: the issue and, while it is open, its lessons."""
     issue_loc = _loc(issue.location)
     if fix:
-        # A fixed issue is history: its title says it happened, and the fix and
-        # the attempts behind it are one get_issue call away. Where it was
-        # fixed stays when the issue itself named no file.
         fixed_loc = issue_loc or _loc(fix.location)
         return [f"- [DONE] #{issue_id} {_clip(issue.summary)}{fixed_loc} (fixed)"]
     lines = [f"- [OPEN] #{issue_id} {_clip(issue.summary)}{issue_loc} (open)"]

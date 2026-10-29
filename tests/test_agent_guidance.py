@@ -235,18 +235,13 @@ def test_supersedes_guidance_says_what_it_does_to_the_summary():
     assert "supersedes=" in text or "--supersedes" in text
 
 
-# ── #29: clipping bounds the summary; asking for short records keeps it small ─
-
 def test_instructions_state_the_record_length_the_summary_clips_at():
-    """The limit the agent is told must be the one summary.md enforces."""
     text = ai_instructions()
     assert f"issue title under {TITLE_CHARS} characters" in text
     assert f"clips longer records at {RECORD_CHARS} characters" in text
 
 
 def test_every_write_tool_states_its_record_length():
-    """A client that never calls get_instructions still reads the argument
-    description of the tool it calls, so the limit has to be there too."""
     import asyncio
 
     from projectmem import mcp_server

@@ -260,9 +260,6 @@ def test_an_orphan_attempt_does_not_crash_the_summary(tmp_path):
 def test_a_fixed_issue_is_listed_by_its_title_alone(
     tmp_path, issue_location, fix_location, shown
 ):
-    """A fixed issue is history. Its title says it happened; how it was fixed
-    and what was tried on the way is one get_issue call away. Where it was
-    fixed stays when the issue itself named no file."""
     from projectmem.models import Event
     from projectmem.summary import build_summary
 
@@ -284,10 +281,6 @@ def test_a_fixed_issue_is_listed_by_its_title_alone(
 
 
 def test_long_records_are_clipped_but_keep_their_location(tmp_path):
-    """One record pasted with its whole investigation used to cost its full
-    length on every session start. The text is clipped; the location is not,
-    because precheck_file and the reader both navigate by it. A short record
-    is printed as it is."""
     from projectmem.models import Event
     from projectmem.storage import RECORD_CHARS
     from projectmem.summary import build_summary
@@ -317,8 +310,6 @@ def test_long_records_are_clipped_but_keep_their_location(tmp_path):
 
 
 def test_a_long_path_is_not_clipped_down_to_the_word_before_it(tmp_path):
-    """Cutting at the last space anywhere in the line used to turn
-    "see <long path>" into "see...", dropping exactly what mattered."""
     from projectmem.models import Event
     from projectmem.storage import RECORD_CHARS
     from projectmem.summary import build_summary
@@ -333,8 +324,6 @@ def test_a_long_path_is_not_clipped_down_to_the_word_before_it(tmp_path):
 
 
 def test_a_multi_line_record_stays_on_one_summary_line(tmp_path):
-    """A pasted traceback or a line starting with "## " must not break out of
-    its list item and open a stray section, in the text or in the location."""
     from projectmem.models import Event
     from projectmem.summary import build_summary
 
