@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 from projectmem.commands.init import _claude_md_bridge
-from projectmem.storage import ai_instructions
+from projectmem.storage import RECORD_CHARS, TITLE_CHARS, ai_instructions
 
 
 def _mcp_instructions() -> str:
@@ -239,30 +239,35 @@ def test_supersedes_guidance_says_what_it_does_to_the_summary():
 
 def test_instructions_state_the_record_length_the_summary_clips_at():
     """The limit the agent is told must be the one summary.md enforces."""
-    from projectmem.storage import RECORD_CHARS, TITLE_CHARS
-
     text = ai_instructions()
     assert f"issue title under {TITLE_CHARS} characters" in text
     assert f"clips longer records at {RECORD_CHARS} characters" in text
 
 
-@pytest.mark.parametrize("tool,limit", [
-    ("log_issue", "TITLE_CHARS"),
-    ("record_attempt", "RECORD_CHARS"),
-    ("record_fix", "RECORD_CHARS"),
-    ("add_decision", "RECORD_CHARS"),
-    ("add_note", "RECORD_CHARS"),
-])
-def test_every_write_tool_states_its_record_length(tool, limit):
+def test_every_write_tool_states_its_record_length():
     """A client that never calls get_instructions still reads the argument
     description of the tool it calls, so the limit has to be there too."""
     import asyncio
 
-    from projectmem import mcp_server, storage
+    from projectmem import mcp_server
 
-    tools = {t.name: t for t in asyncio.run(mcp_server.mcp.list_tools())}
-    description = tools[tool].input_schema["properties"]["summary"]["description"]
-    assert f"under {getattr(storage, limit)} characters" in description
+    limits = {
+        "log_issue": TITLE_CHARS,
+        "record_attempt": RECORD_CHARS,
+        "record_fix": RECORD_CHARS,
+        "add_decision": RECORD_CHARS,
+        "add_note": RECORD_CHARS,
+    }
+    descriptions = {
+        tool.name: tool.input_schema["properties"]["summary"]["description"]
+        for tool in asyncio.run(mcp_server.mcp.list_tools())
+        if tool.name in limits
+    }
+    missing = [
+        tool for tool, limit in limits.items()
+        if f"under {limit} characters" not in descriptions[tool]
+    ]
+    assert not missing, f"no length limit in the summary description of {missing}"
 
 
 def test_the_three_surfaces_agree_about_the_session_start_order():

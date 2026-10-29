@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from typer.testing import CliRunner
 
 from projectmem.cli import app
@@ -250,24 +251,33 @@ def test_an_orphan_attempt_does_not_crash_the_summary(tmp_path):
     assert len(lines) == 1 and "#0001" in lines[0]
 
 
-def test_a_fixed_issue_is_listed_by_its_title_alone(tmp_path):
+
+@pytest.mark.parametrize("issue_location,fix_location,shown", [
+    ("auth/redirect.py", "auth/middleware.py", " [auth/redirect.py]"),
+    (None, "auth/middleware.py", " [auth/middleware.py]"),
+    (None, None, ""),
+])
+def test_a_fixed_issue_is_listed_by_its_title_alone(
+    tmp_path, issue_location, fix_location, shown
+):
     """A fixed issue is history. Its title says it happened; how it was fixed
-    and what was tried on the way is one get_issue call away."""
+    and what was tried on the way is one get_issue call away. Where it was
+    fixed stays when the issue itself named no file."""
     from projectmem.models import Event
     from projectmem.summary import build_summary
 
     events = [
         Event(type="issue", summary="login redirect loop", issue_id="0001",
-              location="auth/redirect.py"),
+              location=issue_location),
         Event(type="attempt", summary="cleared the session cookie first",
               issue_id="0001", outcome="failed"),
         Event(type="fix", summary="guarded the redirect in one middleware",
-              issue_id="0001", location="auth/middleware.py"),
+              issue_id="0001", location=fix_location),
     ]
     summary = build_summary(events, tmp_path)
 
     assert _recent_issue_lines(summary) == [
-        "- [DONE] #0001 login redirect loop [auth/redirect.py] (fixed)"
+        f"- [DONE] #0001 login redirect loop{shown} (fixed)"
     ]
     assert "cleared the session cookie first" not in summary
     assert "guarded the redirect in one middleware" not in summary
@@ -276,7 +286,8 @@ def test_a_fixed_issue_is_listed_by_its_title_alone(tmp_path):
 def test_long_records_are_clipped_but_keep_their_location(tmp_path):
     """One record pasted with its whole investigation used to cost its full
     length on every session start. The text is clipped; the location is not,
-    because precheck_file and the reader both navigate by it."""
+    because precheck_file and the reader both navigate by it. A short record
+    is printed as it is."""
     from projectmem.models import Event
     from projectmem.storage import RECORD_CHARS
     from projectmem.summary import build_summary
@@ -286,6 +297,8 @@ def test_long_records_are_clipped_but_keep_their_location(tmp_path):
         Event(type="issue", summary=long_text, issue_id="0001",
               location="src/collector/socket.py"),
         Event(type="attempt", summary=long_text, issue_id="0001", outcome="partial"),
+        Event(type="attempt", summary="warmed the cache in main.py",
+              issue_id="0001", outcome="failed"),
         Event(type="decision", summary=long_text),
         Event(type="note", summary=long_text),
     ]
@@ -293,6 +306,7 @@ def test_long_records_are_clipped_but_keep_their_location(tmp_path):
 
     issue_line = _recent_issue_lines(summary)[0]
     assert issue_line.endswith("... [src/collector/socket.py] (open)")
+    assert "  - Failed attempt: warmed the cache in main.py\n" in summary
     clipped = [line for line in summary.splitlines() if "the collector drops" in line]
     assert len(clipped) == 4
     for line in clipped:
@@ -300,24 +314,6 @@ def test_long_records_are_clipped_but_keep_their_location(tmp_path):
         assert long_text.startswith(kept)
         assert long_text[len(kept)] == " ", "clipped in the middle of a word"
         assert RECORD_CHARS // 2 < len(kept + "...") <= RECORD_CHARS
-
-
-def test_short_records_are_printed_unchanged(tmp_path):
-    from projectmem.models import Event
-    from projectmem.summary import build_summary
-
-    events = [
-        Event(type="issue", summary="cache misses on cold start", issue_id="0001"),
-        Event(type="attempt", summary="warmed the cache in main.py",
-              issue_id="0001", outcome="failed"),
-        Event(type="decision", summary="keep the cache in process"),
-    ]
-    summary = build_summary(events, tmp_path)
-
-    assert "- [OPEN] #0001 cache misses on cold start (open)" in summary
-    assert "  - Failed attempt: warmed the cache in main.py" in summary
-    assert "- keep the cache in process" in summary
-    assert "..." not in _section(summary, "Recent issues")
 
 
 def test_a_long_path_is_not_clipped_down_to_the_word_before_it(tmp_path):
@@ -338,27 +334,13 @@ def test_a_long_path_is_not_clipped_down_to_the_word_before_it(tmp_path):
 
 def test_a_multi_line_record_stays_on_one_summary_line(tmp_path):
     """A pasted traceback or a line starting with "## " must not break out of
-    its list item and open a stray section."""
+    its list item and open a stray section, in the text or in the location."""
     from projectmem.models import Event
     from projectmem.summary import build_summary
 
-    events = [Event(type="note", summary="  first line\n## not a heading\n\tthird  ")]
+    events = [Event(type="note", summary="  first line\n## not a heading\n\tthird  ",
+                    location="a.py\n## not a heading either")]
     summary = build_summary(events, tmp_path)
 
-    assert "- first line ## not a heading third" in summary
+    assert "- first line ## not a heading third [a.py ## not a heading either]" in summary
     assert "\n## not a heading" not in summary
-
-
-def test_a_fixed_issue_without_a_location_keeps_where_it_was_fixed(tmp_path):
-    from projectmem.models import Event
-    from projectmem.summary import build_summary
-
-    events = [
-        Event(type="issue", summary="timeline jumps after reload", issue_id="0001"),
-        Event(type="fix", summary="restored the scroll anchor", issue_id="0001",
-              location="web/use-anchor.ts"),
-    ]
-
-    assert _recent_issue_lines(build_summary(events, tmp_path)) == [
-        "- [DONE] #0001 timeline jumps after reload [web/use-anchor.ts] (fixed)"
-    ]

@@ -49,12 +49,17 @@ def _clip(text: str) -> str:
         return text
     head = text[: RECORD_CHARS - 3]
     # Cut at a word boundary, so a clipped line never ends in half a word —
-    # but only near the end: a record whose one early space precedes a long
-    # path or URL would otherwise shrink to its first word.
-    boundary = head.rfind(" ")
-    if boundary > RECORD_CHARS // 2:
+    # but only in the second half: a record whose one early space precedes a
+    # long path or URL would otherwise shrink to its first word.
+    boundary = head.rfind(" ", RECORD_CHARS // 2 + 1)
+    if boundary != -1:
         head = head[:boundary]
     return head.rstrip(" ,;:") + "..."
+
+
+def _loc(location: str | None) -> str:
+    """A location as the summary prints it: never clipped, always one line."""
+    return f" [{' '.join(location.split())}]" if location else ""
 
 
 def _issue_sort_key(item: tuple[str, list[Event]]) -> tuple[int, str]:
@@ -67,12 +72,12 @@ def _issue_lines(
     issue_id: str, issue: Event, issue_events: list[Event], fix: Event | None
 ) -> list[str]:
     """One issue's summary entry: the issue and, while it is open, its lessons."""
-    issue_loc = f" [{issue.location}]" if issue.location else ""
+    issue_loc = _loc(issue.location)
     if fix:
         # A fixed issue is history: its title says it happened, and the fix and
         # the attempts behind it are one get_issue call away. Where it was
         # fixed stays when the issue itself named no file.
-        fixed_loc = issue_loc or (f" [{fix.location}]" if fix.location else "")
+        fixed_loc = issue_loc or _loc(fix.location)
         return [f"- [DONE] #{issue_id} {_clip(issue.summary)}{fixed_loc} (fixed)"]
     lines = [f"- [OPEN] #{issue_id} {_clip(issue.summary)}{issue_loc} (open)"]
     # Surface non-worked attempts. Both `failed` and `partial` outcomes
@@ -85,9 +90,8 @@ def _issue_lines(
     ]
     label = {"failed": "Failed attempt", "partial": "Partial attempt"}
     for lesson_event in lessons[-3:]:
-        loc = f" [{lesson_event.location}]" if lesson_event.location else ""
         tag = label.get(lesson_event.outcome or "failed", "Attempt")
-        lines.append(f"  - {tag}: {_clip(lesson_event.summary)}{loc}")
+        lines.append(f"  - {tag}: {_clip(lesson_event.summary)}{_loc(lesson_event.location)}")
     return lines
 
 
@@ -232,16 +236,14 @@ def build_summary(
                 "not shown (`pjm search`, or `search_events(query)` via MCP)"
             )
         for event in decisions[-RECENT_DECISIONS:]:
-            loc = f" [{event.location}]" if event.location else ""
-            lines.append(f"- {_clip(event.summary)}{loc}")
+            lines.append(f"- {_clip(event.summary)}{_loc(event.location)}")
     else:
         lines.append("- No decisions logged yet.")
 
     lines.extend(["", "## Notes"])
     if notes:
         for event in notes[-10:]:
-            loc = f" [{event.location}]" if event.location else ""
-            lines.append(f"- {_clip(event.summary)}{loc}")
+            lines.append(f"- {_clip(event.summary)}{_loc(event.location)}")
     else:
         lines.append("- No notes logged yet.")
 

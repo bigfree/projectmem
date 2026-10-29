@@ -68,6 +68,9 @@ _TITLE_LENGTH = f" Keep it under {TITLE_CHARS} characters."
 _RECORD_LENGTH = (
     f" Keep it under {RECORD_CHARS} characters: summary.md clips longer text."
 )
+# A fix is not shown in summary.md at all (get_issue has it), so no clipping
+# reason to give — only the limit.
+_FIX_LENGTH = f" Keep it under {RECORD_CHARS} characters."
 
 
 # ── L-005: pin the project root before tools run ────────────────────────
@@ -201,9 +204,9 @@ mcp = FastMCP(
         "You are connected to projectmem — a mandatory project memory + "
         "judgment layer. The tools below are FAR cheaper than re-deriving "
         "the same information from source: get_summary returns a bounded "
-        "snapshot, typically a few hundred to ~1,500 tokens; re-scanning the "
-        "project to answer the same question usually costs several times "
-        "that.\n"
+        "snapshot, a few hundred tokens on a young project and a few thousand "
+        "on an aged one; re-scanning the project to answer the same question "
+        "usually costs several times that.\n"
         "\n"
         "SESSION START — call these three tools, in this order, BEFORE\n"
         "answering ANY question about this project:\n"
@@ -280,8 +283,8 @@ def get_summary(project: ProjectArg = None) -> str:
     Do NOT answer from conversation history alone.
     Do NOT re-scan source files (package.json, README, src/) to understand
     the project — `summary.md` is the distilled authoritative source and
-    stays bounded as the project ages (typically a few hundred to ~1,500
-    tokens), far less than re-deriving it.
+    stays bounded as the project ages (a few hundred tokens on a young
+    project, a few thousand on an aged one), far less than re-deriving it.
 
     Your prior assumptions about this project may be stale. Call this
     cheaply at session start (and again before ending) to verify your
@@ -649,7 +652,7 @@ def record_fix(
             description=(
                 "One-line description of the confirmed fix "
                 "(e.g., 'guarded submit handler with isSubmitting ref')."
-                + _RECORD_LENGTH
+                + _FIX_LENGTH
             )
         ),
     ],
