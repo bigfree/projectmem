@@ -27,6 +27,12 @@ INSTRUCTIONS_BACKUP_FILE = AI_INSTRUCTIONS_FILE + ".bak"
 _INSTRUCTIONS_MARKER_RE = re.compile(r"<!--\s*projectmem-instructions:\s*(\d+)\s*-->")
 GLOBAL_MEMORY_HEADING = "## Global Memory — Inherited Knowledge"
 
+# Record lengths the guidance asks for (#29). summary.md is read at the start
+# of every session and clips record text at RECORD_CHARS; the instructions and
+# the MCP tool descriptions state both limits from here, so they cannot drift.
+TITLE_CHARS = 140
+RECORD_CHARS = 300
+
 
 class ProjectMemError(RuntimeError):
     pass
@@ -523,10 +529,10 @@ def ai_instructions() -> str:
         "- Keep entries concise but specific enough that another person or AI can "
         "avoid repeating work. Include file paths, error names, test names.\n"
         "- Prefer several small accurate entries over one vague long entry.\n"
-        "- Keep an issue title under 140 characters and an attempt, fix, note or "
-        "decision under 300. `summary.md` is read at every session start and clips "
-        "longer records at 300 characters; put further evidence into another "
-        "`record_attempt` instead of one long entry.\n"
+        f"- Keep an issue title under {TITLE_CHARS} characters and an attempt, fix, "
+        f"note or decision under {RECORD_CHARS}. `summary.md` is read at every "
+        f"session start and clips longer records at {RECORD_CHARS} characters; put "
+        "further evidence into another `record_attempt` instead of one long entry.\n"
         "- Do not claim something is fixed until tests, reproduction, or user "
         "confirmation supports it.\n"
         "- Do not overwrite history. `events.jsonl` is append-only; `summary.md` "

@@ -278,7 +278,8 @@ def test_long_records_are_clipped_but_keep_their_location(tmp_path):
     length on every session start. The text is clipped; the location is not,
     because precheck_file and the reader both navigate by it."""
     from projectmem.models import Event
-    from projectmem.summary import LINE_CHARS, build_summary
+    from projectmem.storage import RECORD_CHARS
+    from projectmem.summary import build_summary
 
     long_text = "the collector drops its websocket " * 30
     events = [
@@ -295,8 +296,10 @@ def test_long_records_are_clipped_but_keep_their_location(tmp_path):
     clipped = [line for line in summary.splitlines() if "the collector drops" in line]
     assert len(clipped) == 4
     for line in clipped:
-        text = line[line.index("the collector drops"):].split("...")[0] + "..."
-        assert len(text) <= LINE_CHARS
+        kept = line[line.index("the collector drops"):].split("...")[0]
+        assert long_text.startswith(kept)
+        assert long_text[len(kept)] == " ", "clipped in the middle of a word"
+        assert RECORD_CHARS // 2 < len(kept + "...") <= RECORD_CHARS
 
 
 def test_short_records_are_printed_unchanged(tmp_path):
@@ -315,3 +318,47 @@ def test_short_records_are_printed_unchanged(tmp_path):
     assert "  - Failed attempt: warmed the cache in main.py" in summary
     assert "- keep the cache in process" in summary
     assert "..." not in _section(summary, "Recent issues")
+
+
+def test_a_long_path_is_not_clipped_down_to_the_word_before_it(tmp_path):
+    """Cutting at the last space anywhere in the line used to turn
+    "see <long path>" into "see...", dropping exactly what mattered."""
+    from projectmem.models import Event
+    from projectmem.storage import RECORD_CHARS
+    from projectmem.summary import build_summary
+
+    path = "src/" + "generated/" * 40 + "client.py"
+    events = [Event(type="note", summary=f"see {path}")]
+    note = _section(build_summary(events, tmp_path), "Notes").strip()
+
+    assert note.startswith("- see src/generated/")
+    assert note.endswith("...")
+    assert len(note) == len("- ") + RECORD_CHARS
+
+
+def test_a_multi_line_record_stays_on_one_summary_line(tmp_path):
+    """A pasted traceback or a line starting with "## " must not break out of
+    its list item and open a stray section."""
+    from projectmem.models import Event
+    from projectmem.summary import build_summary
+
+    events = [Event(type="note", summary="  first line\n## not a heading\n\tthird  ")]
+    summary = build_summary(events, tmp_path)
+
+    assert "- first line ## not a heading third" in summary
+    assert "\n## not a heading" not in summary
+
+
+def test_a_fixed_issue_without_a_location_keeps_where_it_was_fixed(tmp_path):
+    from projectmem.models import Event
+    from projectmem.summary import build_summary
+
+    events = [
+        Event(type="issue", summary="timeline jumps after reload", issue_id="0001"),
+        Event(type="fix", summary="restored the scroll anchor", issue_id="0001",
+              location="web/use-anchor.ts"),
+    ]
+
+    assert _recent_issue_lines(build_summary(events, tmp_path)) == [
+        "- [DONE] #0001 timeline jumps after reload [web/use-anchor.ts] (fixed)"
+    ]

@@ -6,7 +6,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from projectmem.models import Event, superseded_ids
-from projectmem.storage import issues_dir, project_map_path, read_events, summary_path
+from projectmem.storage import (
+    RECORD_CHARS,
+    issues_dir,
+    project_map_path,
+    read_events,
+    summary_path,
+)
 
 
 # Phrases that mean "this is still placeholder content, treat as not-yet-set"
@@ -29,19 +35,25 @@ RECENT_FIXED_ISSUES = 10
 RECENT_DECISIONS = 15
 OPEN_IN_FULL = 20
 
-# Longest record text summary.md prints. The summary is read at the start of
-# every session, so a record pasted with its whole investigation costs its full
-# length every time; the full text stays in issues/, events.jsonl and search.
-LINE_CHARS = 300
-
-
 def _clip(text: str) -> str:
-    if len(text) <= LINE_CHARS:
+    """A record as one summary line of at most RECORD_CHARS characters.
+
+    The summary is read at the start of every session, so a record pasted with
+    its whole investigation costs its full length every time; the full text
+    stays in issues/, events.jsonl and search. Line breaks are folded into
+    spaces, so a pasted traceback or a line starting with "## " cannot break
+    out of its list item.
+    """
+    text = " ".join(text.split())
+    if len(text) <= RECORD_CHARS:
         return text
-    head = text[: LINE_CHARS - 3]
-    # Cut at a word boundary, so a clipped line never ends in half a word.
-    if " " in head:
-        head = head.rsplit(" ", 1)[0]
+    head = text[: RECORD_CHARS - 3]
+    # Cut at a word boundary, so a clipped line never ends in half a word —
+    # but only near the end: a record whose one early space precedes a long
+    # path or URL would otherwise shrink to its first word.
+    boundary = head.rfind(" ")
+    if boundary > RECORD_CHARS // 2:
+        head = head[:boundary]
     return head.rstrip(" ,;:") + "..."
 
 
@@ -58,8 +70,10 @@ def _issue_lines(
     issue_loc = f" [{issue.location}]" if issue.location else ""
     if fix:
         # A fixed issue is history: its title says it happened, and the fix and
-        # the attempts behind it are one get_issue call away.
-        return [f"- [DONE] #{issue_id} {_clip(issue.summary)}{issue_loc} (fixed)"]
+        # the attempts behind it are one get_issue call away. Where it was
+        # fixed stays when the issue itself named no file.
+        fixed_loc = issue_loc or (f" [{fix.location}]" if fix.location else "")
+        return [f"- [DONE] #{issue_id} {_clip(issue.summary)}{fixed_loc} (fixed)"]
     lines = [f"- [OPEN] #{issue_id} {_clip(issue.summary)}{issue_loc} (open)"]
     # Surface non-worked attempts. Both `failed` and `partial` outcomes
     # encode lessons the next session needs — dropping `partial` (L-027b)

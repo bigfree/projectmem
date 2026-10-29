@@ -49,12 +49,24 @@ from pydantic import Field
 
 from projectmem.commands import attempt, decision, fix, log, note
 from projectmem.storage import (
+    RECORD_CHARS,
+    TITLE_CHARS,
     ai_instructions_path,
     discover_mem_dir,
     project_map_path,
     plan_path,
     read_events,
     summary_path,
+)
+
+
+# ── #29: say how long a record may be where the record is written ──────────
+#
+# AI_INSTRUCTIONS.md states the limits too, but a client that never calls
+# get_instructions only ever sees the tool's own argument descriptions.
+_TITLE_LENGTH = f" Keep it under {TITLE_CHARS} characters."
+_RECORD_LENGTH = (
+    f" Keep it under {RECORD_CHARS} characters: summary.md clips longer text."
 )
 
 
@@ -548,8 +560,8 @@ def get_global_gotchas(
 def log_issue(
     summary: Annotated[str, Field(
         description="One-line description of the bug or unexpected "
-                    "behavior (~140 chars recommended). Becomes the "
-                    "issue title and is matched by search_events."
+                    "behavior. Becomes the issue title and is matched by "
+                    "search_events." + _TITLE_LENGTH
     )],
     location: Annotated[Optional[str], Field(
         description="Optional file path or component where the issue "
@@ -579,7 +591,9 @@ def log_issue(
 def record_attempt(
     summary: Annotated[str, Field(
         description="One-line description of what you tried (e.g., "
-                    "'tried contain: layout — preview still jumps')."
+                    "'tried contain: layout — preview still jumps'). Put "
+                    "further evidence into another attempt, not this one."
+                    + _RECORD_LENGTH
     )],
     outcome: Annotated[str, Field(
         description="Result of the attempt. Must be exactly one of "
@@ -635,6 +649,7 @@ def record_fix(
             description=(
                 "One-line description of the confirmed fix "
                 "(e.g., 'guarded submit handler with isSubmitting ref')."
+                + _RECORD_LENGTH
             )
         ),
     ],
@@ -679,6 +694,7 @@ def add_decision(
                     "product decision (e.g., 'use bcrypt rounds=12 for "
                     "password hashing'). Becomes part of the project's "
                     "permanent record — write it for a future contributor."
+                    + _RECORD_LENGTH
     )],
     location: Annotated[Optional[str], Field(
         description="Optional file path or scope where the decision "
@@ -724,7 +740,7 @@ def add_note(
                     "or context worth preserving. Prefix with 'gotcha:' "
                     "or 'lesson:' to enable cross-project promotion — "
                     "e.g., 'gotcha: bcrypt v4 silently truncates "
-                    "passwords longer than 72 bytes'."
+                    "passwords longer than 72 bytes'." + _RECORD_LENGTH
     )],
     location: Annotated[Optional[str], Field(
         description="Optional file path or library this note applies to "
