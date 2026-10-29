@@ -15,6 +15,7 @@ import pytest
 from conftest import set_fake_home
 from projectmem.models import Event
 from projectmem.storage import append_event, initialize
+from projectmem.summary import regenerate_summary
 
 
 def _completed(args: list[str], stdout: str = "") -> subprocess.CompletedProcess[str]:
@@ -367,6 +368,30 @@ def test_mcp_get_issue_accepts_unpadded_ids_and_rejects_globs(
         assert "login double submit" in text, issue_id
 
     for issue_id in ("*", "2"):
+        text = _tool_text(
+            _call_mcp_tool(project, tmp_path, "get_issue", {"issue_id": issue_id})
+        )
+        assert text == f"No issue found with ID {issue_id}.", issue_id
+
+
+def test_mcp_get_issue_finds_backfilled_legacy_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`pjm init` backfill writes ids like `legacy_f436`, which `pjm fix`
+    accepts; a digits-only check made get_issue refuse them."""
+    project = _make_git_project(tmp_path, monkeypatch)
+    append_event(
+        Event(type="issue", issue_id="legacy_f436", summary="Legacy issue: fix login"),
+        project,
+    )
+    regenerate_summary(project)
+
+    text = _tool_text(
+        _call_mcp_tool(project, tmp_path, "get_issue", {"issue_id": "legacy_f436"})
+    )
+    assert "fix login" in text
+
+    for issue_id in ("legacy_*", "legacy_f43?", "[l]egacy_f436"):
         text = _tool_text(
             _call_mcp_tool(project, tmp_path, "get_issue", {"issue_id": issue_id})
         )

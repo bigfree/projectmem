@@ -28,7 +28,7 @@ import typer
 
 from projectmem.glyphs import RULE
 from projectmem.models import Event, location_to_file, superseded_ids
-from projectmem.staleness import is_memory_path, project_relative
+from projectmem.staleness import is_memory_path, project_relative, root_posix_of
 from projectmem.storage import MEM_DIR, read_events, require_mem_dir
 
 
@@ -256,10 +256,16 @@ def _analyze_files(
     # own doing: checking it reported "HIGH CHURN: 7 changes in last 30 days /
     # May indicate unresolved architectural issue" about the memory layer.
     # Filtered here, not in the callers, so the MCP precheck_file path is covered.
-    files = [f for f in files if not is_memory_path(f, root)]
+    root_posix = root_posix_of(root)
+    files = [f for f in files if not is_memory_path(f, root, root_posix=root_posix)]
     # Events store project-relative paths; `./src/a.py` or an absolute path
-    # matched nothing and came back "Safe to modify".
-    files = [project_relative(f, root) for f in files]
+    # matched nothing and came back "Safe to modify". Two spellings of one
+    # file are one file, and the root itself ("." once anchored) is not a file
+    # at all: as a summary match it would hit every event with a period in it.
+    files = list(dict.fromkeys(
+        rel for f in files
+        if (rel := project_relative(f, root, root_posix=root_posix)) != "."
+    ))
     if not files:
         return warnings
 
@@ -281,9 +287,12 @@ def _analyze_files(
     except Exception:
         stale_by_file = defaultdict(list)
 
+    # Every event's paths normalized once, not once per checked file.
+    live_paths = _live_event_paths(events, root, root_posix)
+
     for file_path in files:
         # Find all events referencing this file
-        file_events = _events_for_file(file_path, events, root)
+        file_events = _events_for_file(file_path, events, root, live_paths)
 
         if not file_events:
             continue
@@ -423,33 +432,58 @@ def _analyze_files(
 
 
 def _events_for_file(
-    file_path: str, events: list[Event], root: Path | None = None
+    file_path: str,
+    events: list[Event],
+    root: Path | None = None,
+    live_paths: list[tuple[Event, frozenset[str]]] | None = None,
 ) -> list[Event]:
     """Return all live events that reference this file.
 
     Superseded events are excluded. Warning someone off an approach on the
     strength of a decision they explicitly retired is worse than not warning
     at all — it makes the memory look wrong at the moment it interrupts you.
+
+    ``live_paths`` is ``_live_event_paths(events, root)``; pass it when asking
+    about several files so the log is normalized once.
     """
+    if live_paths is None:
+        live_paths = _live_event_paths(events, root)
+    return [
+        e for e, paths in live_paths
+        # Direct files list or location field, then a summary mention
+        if file_path in paths or file_path in e.summary
+    ]
+
+
+def _live_event_paths(
+    events: list[Event], root: Path | None = None, root_posix: str | None = None
+) -> list[tuple[Event, frozenset[str]]]:
+    """Each live event with the project-relative spellings of the files it
+    cites (``files`` plus the location's file), in log order.
+
+    One pass over the log, with each distinct raw path normalized once: logs
+    repeat the same few paths thousands of times, and precheck runs before
+    every edit.
+    """
+    root_posix = root_posix or root_posix_of(root)
     retired = superseded_ids(events)
-    matching: list[Event] = []
+    cache: dict[str, str] = {}
+
+    def rel(path: str) -> str:
+        if path not in cache:
+            cache[path] = project_relative(path, root, root_posix=root_posix)
+        return cache[path]
+
+    out: list[tuple[Event, frozenset[str]]] = []
     for e in events:
         if e.id in retired:
             continue
-        # Direct files list
-        if file_path in (project_relative(f, root) for f in e.files):
-            matching.append(e)
-            continue
-        # Location field
-        if e.location:
-            loc_file = location_to_file(e.location) or ""
-            if loc_file and project_relative(loc_file, root) == file_path:
-                matching.append(e)
-                continue
-        # Summary mention
-        if file_path in e.summary:
-            matching.append(e)
-    return matching
+        paths = {rel(f) for f in e.files}
+        loc_file = location_to_file(e.location) if e.location else None
+        if loc_file:
+            paths.add(rel(loc_file))
+        out.append((e, frozenset(paths)))
+    return out
 
 
 def _find_open_issues(

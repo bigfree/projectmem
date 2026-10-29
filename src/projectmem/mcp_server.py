@@ -32,6 +32,7 @@ import contextlib
 import functools
 import io
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Annotated, Callable, Optional
@@ -377,9 +378,10 @@ def get_issue(
     from projectmem.storage import issues_dir, normalize_issue_id
     idir = issues_dir(_root_for(project))
     # Same normalization as record_fix: "1", "001" and "#1" all mean 0001.
-    # Non-numeric IDs never reach the glob, so "*" can't match some other issue.
+    # Only ID-shaped input reaches the glob ("0001", backfill's "legacy_f436"),
+    # so "*" or "?" can't match some other issue.
     wanted = normalize_issue_id(issue_id) or ""
-    if not wanted.isdecimal():
+    if not re.fullmatch(r"[\w-]+", wanted):
         return f"No issue found with ID {issue_id}."
     matches = list(idir.glob(f"{wanted}-*.md"))
     if not matches:

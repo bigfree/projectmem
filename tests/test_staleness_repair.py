@@ -254,3 +254,88 @@ def test_an_absolute_path_through_a_symlinked_folder_is_still_ours(tmp_path):
     assert is_memory_path(str(link / ".projectmem" / "summary.md"), real)
     assert is_memory_path(str(real / ".projectmem" / "summary.md"), link)
     assert not is_memory_path(str(link / "src" / "app.py"), real)
+
+
+# ── One spelling per file: precheck and staleness agree (#26 review) ────────
+
+def test_a_decision_logged_at_an_absolute_path_is_stale_for_precheck_too(worked_on_repo):
+    """`pjm brief` flagged it; precheck asked about `src/f.py` and didn't."""
+    absolute = _event("abs", "2026-02-01T10:00:00Z", f"{worked_on_repo}/src/f.py:3")
+
+    assert location_file(absolute, worked_on_repo) == "src/f.py"
+    flagged = find_stale_events([absolute], worked_on_repo, only_files={"src/f.py"})
+    assert [(x["event"].id, x["commits_since"]) for x in flagged] == [("abs", 3)]
+
+
+def test_a_windows_drive_path_is_made_project_relative(monkeypatch):
+    """`posixpath.isabs("C:/proj/src/a.py")` is False, so on a Windows server
+    the drive-letter spelling was never anchored and came back safe."""
+    from projectmem.staleness import project_relative
+
+    for spelling in ("C:/proj/src/a.py", "C:\\proj\\src\\a.py", "C:/proj/./src/a.py"):
+        assert project_relative(spelling, root_posix="C:/proj") == "src/a.py", spelling
+    assert project_relative("D:/other/a.py", root_posix="C:/proj") == "D:/other/a.py"
+
+
+def test_precheck_matches_a_windows_drive_path_on_a_windows_root(repo, monkeypatch):
+    from projectmem.commands import precheck
+
+    monkeypatch.setattr(precheck, "root_posix_of", lambda root=None: "C:/proj")
+    events = [Event(type="attempt", summary=f"lock variant {i}", outcome="failed",
+                    location="src/f.py") for i in range(3)]
+
+    warnings = _analyze_files(["C:\\proj\\src\\f.py"], events, root=repo)
+    assert [w["type"] for w in warnings] == ["failed_attempts"]
+
+
+def test_two_spellings_of_one_file_warn_once(repo):
+    events = [Event(type="attempt", summary=f"lock variant {i}", outcome="failed",
+                    location="src/f.py") for i in range(3)]
+
+    once = _analyze_files(["src/f.py"], events, root=repo)
+    twice = _analyze_files(["src/f.py", "./src/f.py", str(repo / "src" / "f.py")],
+                           events, root=repo)
+    assert len(once) == len(twice) == 1
+
+
+def test_the_project_root_is_not_a_file(repo):
+    """Anchored, the root is "." — as a summary match that hit every event
+    with a period in it."""
+    events = [Event(type="attempt", summary=f"tried v1.{i} of the client.",
+                    outcome="failed") for i in range(3)]
+
+    assert _analyze_files([str(repo)], events, root=repo) == []
+
+
+def test_precheck_normalizes_each_logged_path_once(repo, monkeypatch):
+    """Normalizing every event's paths again for every checked file took
+    matching 5 files on a 3,000-event log from 14 ms to about 1 s."""
+    from projectmem import staleness
+    from projectmem.commands import precheck
+
+    calls = {"rel": 0, "root": 0}
+    real_rel, real_root = staleness.project_relative, staleness.root_posix_of
+
+    def counting_rel(*a, **k):
+        calls["rel"] += 1
+        return real_rel(*a, **k)
+
+    def counting_root(*a, **k):
+        calls["root"] += 1
+        return real_root(*a, **k)
+
+    monkeypatch.setattr(precheck, "project_relative", counting_rel)
+    monkeypatch.setattr(staleness, "project_relative", counting_rel)
+    monkeypatch.setattr(precheck, "root_posix_of", counting_root)
+    monkeypatch.setattr(staleness, "root_posix_of", counting_root)
+    absolute = str(repo / "src" / "f.py")
+    events = [Event(type="note", summary=f"n{i}", files=[absolute, "src/g.py"],
+                    location=f"{absolute}:{i}") for i in range(300)]
+    files = [f"src/m{i}.py" for i in range(5)]
+
+    _analyze_files(files, events, root=repo)
+
+    # 5 checked files + 2 distinct logged paths + 1 distinct location, not
+    # 300 events x 3 paths x 5 files.
+    assert calls["rel"] <= len(files) + 3 + 3
+    assert calls["root"] <= 2

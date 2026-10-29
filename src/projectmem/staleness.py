@@ -48,11 +48,32 @@ _STALE_CHECKED_TYPES = ("decision", "fix", "note")
 _AUTO_CAPTURED_FACT_TYPES = ("fix", "note")
 
 
-def location_file(event: Event, root: Path | None = None) -> str | None:
-    """File part of an event's location (``src/auth.py:42`` -> ``src/auth.py``)."""
+def location_file(
+    event: Event,
+    root: Path | None = None,
+    *,
+    root_posix: str | None = None,
+    cache: dict[str, str | None] | None = None,
+) -> str | None:
+    """File part of an event's location (``src/auth.py:42`` -> ``src/auth.py``),
+    project-relative.
+
+    ``root_posix`` and ``cache`` are for callers walking the whole log: the
+    root is resolved once, and each distinct location is judged once.
+    """
     if not event.location:
         return None
     file_part = location_to_file(event.location) or ""
+    if cache is None:
+        return _location_path(file_part, root, root_posix)
+    if file_part not in cache:
+        cache[file_part] = _location_path(file_part, root, root_posix)
+    return cache[file_part]
+
+
+def _location_path(
+    file_part: str, root: Path | None, root_posix: str | None
+) -> str | None:
     # Locations like "class AuthHandler" or "deploy pipeline" aren't paths.
     if not file_part or ("/" not in file_part and "." not in file_part):
         return None
@@ -60,12 +81,17 @@ def location_file(event: Event, root: Path | None = None) -> str | None:
     # any event located there would be flagged within three commits; before
     # #20 auto-capture located most commits there, and the log is append-only,
     # so those events are still in users' logs. Judge them never, not forever.
-    if is_memory_path(file_part, root):
+    root_posix = root_posix or root_posix_of(root)
+    if is_memory_path(file_part, root, root_posix=root_posix):
         return None
-    return file_part
+    # The same spelling precheck matches on, so a decision logged with an
+    # absolute path is judged for `src/auth.py` by precheck as well as brief.
+    return project_relative(file_part, root, root_posix=root_posix)
 
 
-def is_memory_path(path: str, root: Path | None = None) -> bool:
+def is_memory_path(
+    path: str, root: Path | None = None, *, root_posix: str | None = None
+) -> bool:
     """True for a path inside the project's own ``.projectmem/``.
 
     One rule for every reader (staleness, precheck, the MCP tool): the path,
@@ -79,7 +105,7 @@ def is_memory_path(path: str, root: Path | None = None) -> bool:
     a subdirectory — an MCP client's cwd, say — and is anchored there instead.
     ``src/../.projectmem/summary.md`` and ``./`` fold through ``normpath``.
     """
-    root_posix = (root or Path.cwd()).resolve().as_posix()
+    root_posix = root_posix or root_posix_of(root)
     normalized = path.replace("\\", "/")
     if _WINDOWS_DRIVE.match(normalized) and not _WINDOWS_DRIVE.match(root_posix):
         # A Windows path handed to a POSIX server cannot be anchored to the
@@ -92,43 +118,62 @@ def is_memory_path(path: str, root: Path | None = None) -> bool:
         candidate = posixpath.normpath(
             normalized if base is None else posixpath.join(base, normalized)
         )
-        # The root is resolved, so resolve an absolute candidate too: on macOS
-        # `/tmp/proj/.projectmem/x` is `/private/tmp/proj/...` once resolved,
-        # and any project reached through a symlinked folder has the same gap.
-        spellings = [candidate]
-        if base is None:
-            spellings.append(_resolved_posix(candidate))
-        for spelling in spellings:
-            try:
-                rel = Path(spelling).relative_to(root_posix)
-            except ValueError:
-                continue  # outside the project from this anchor
-            return bool(rel.parts) and rel.parts[0] == MEM_DIR
+        rel = _anchor(candidate, root_posix, resolve=base is None)
+        if rel is None:
+            continue  # outside the project from this anchor
+        return bool(rel.parts) and rel.parts[0] == MEM_DIR
     return False
 
 
-def project_relative(path: str, root: Path | None = None) -> str:
+def project_relative(
+    path: str, root: Path | None = None, *, root_posix: str | None = None
+) -> str:
     """One spelling per file, so `src/a.py`, `./src/a.py` and the absolute
     path all match the same events.
 
     ``./`` and ``..`` fold through ``normpath``; an absolute path inside the
-    project becomes project-relative (resolved too, for macOS ``/tmp`` and
-    symlinked folders). Anything else is returned normalized but unanchored.
+    project, POSIX or drive-letter, becomes project-relative (resolved too,
+    for macOS ``/tmp`` and symlinked folders). Anything else is returned
+    normalized but unanchored.
+
+    ``root_posix`` (from ``root_posix_of``) lets a caller normalizing many
+    paths resolve the root once instead of once per path.
     """
     normalized = path.replace("\\", "/")
     if not normalized:
         return path
     candidate = posixpath.normpath(normalized)
-    if not posixpath.isabs(candidate):
+    if not (posixpath.isabs(candidate) or _WINDOWS_DRIVE.match(candidate)):
         return candidate
-    root_posix = (root or Path.cwd()).resolve().as_posix()
-    for spelling in (candidate, _resolved_posix(candidate)):
+    rel = _anchor(candidate, root_posix or root_posix_of(root), resolve=True)
+    return candidate if rel is None else rel.as_posix()
+
+
+def root_posix_of(root: Path | None = None) -> str:
+    """The resolved project root, in the form ``_anchor`` compares against."""
+    return (root or Path.cwd()).resolve().as_posix()
+
+
+def _anchor(candidate: str, root_posix: str, *, resolve: bool) -> Path | None:
+    """``candidate`` (absolute, normalized) relative to the root, or None when
+    it lies outside. ``is_memory_path`` and ``project_relative`` share this so
+    the two cannot disagree about which paths are in the project.
+
+    The root is resolved, so with ``resolve`` an absolute candidate is tried
+    resolved too: on macOS ``/tmp/proj/x`` is ``/private/tmp/proj/x`` once
+    resolved, and any project reached through a symlinked folder has the
+    same gap. The lexical spelling goes first, so the filesystem is only
+    touched when it does not match.
+    """
+    spellings = [candidate]
+    if resolve:
+        spellings.append(_resolved_posix(candidate))
+    for spelling in spellings:
         try:
-            rel = Path(spelling).relative_to(root_posix)
+            return Path(spelling).relative_to(root_posix)
         except ValueError:
             continue
-        return rel.as_posix()
-    return candidate
+    return None
 
 
 def _resolved_posix(path: str) -> str:
@@ -245,6 +290,8 @@ def find_stale_events(
     """
     root_path = root or Path.cwd()
     retired = superseded_ids(events)
+    root_posix = root_posix_of(root_path)
+    located: dict[str, str | None] = {}
 
     # Pass one: decide what to ask about, before running any git.
     candidates: list[tuple[Event, str]] = []
@@ -258,7 +305,9 @@ def find_stale_events(
         # the warning. An auto-captured decision is a claim, and stays.
         if event.auto_captured and event.type in _AUTO_CAPTURED_FACT_TYPES:
             continue
-        file_path = location_file(event, root_path)
+        file_path = location_file(
+            event, root_path, root_posix=root_posix, cache=located
+        )
         if not file_path:
             continue
         if only_files is not None and file_path not in only_files:
